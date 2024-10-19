@@ -7,9 +7,9 @@
 
 static DS1307 RTC;
 
-int lastMotionDetected = 0;
+unsigned long lastMotionDetected = 0;
 bool currentState = 0;
-#define TIMEOUT (5 * 60 * 1000) // 5 minutes in milliseconds
+unsigned long TIMEOUT = (60UL * 1000); // minutes in milliseconds
 
 void setup() {
     pinMode(WARM_WHITE_PIN, OUTPUT);
@@ -18,10 +18,10 @@ void setup() {
 
     Serial.begin(9600);
 
-    if (RTC.isRunning())
+    if (RTC.begin())
         Serial.println("RTC runnining: " + String(RTC.getHours()) + ":" + String(RTC.getMinutes()) + ":" + String(RTC.getSeconds()));
     else
-        Serial.println("RTC not running");
+        Serial.println("RTC failed to start");
 
     // Test LEDs
     analogWrite(WARM_WHITE_PIN, 127);
@@ -53,10 +53,10 @@ void loop()
         currentState = 1;
         Serial.println("Motion detected");
     } else {
-        Serial.println("No motion detected");
+        Serial.println("No motion detected for " + String((millis() - lastMotionDetected) / 1000));
     }
 
-    if ((millis() - lastMotionDetected) > TIMEOUT)
+    if (((millis() - lastMotionDetected) > TIMEOUT) && currentState == 1)
     { // If no motion has been detected for TIMEOUT milliseconds
         Serial.println("Timeout");
         currentState = 0;
@@ -82,8 +82,24 @@ void loop()
     {
         setLEDs(0, 0);
     }
-
     delay(1000);
+
+    if (Serial.available()) {
+        String message = Serial.readStringUntil('\n'); // Read the incoming data until newline
+
+        // Check if the message starts with "rtc "
+        if (message.startsWith("rtc ")) {
+            message = message.substring(4); // Remove "rtc " from the message
+
+            // Parse the hours, minutes and seconds from the message
+            int hour = message.substring(0, 2).toInt();
+            int minute = message.substring(3, 5).toInt();
+
+            // Set the time
+            RTC.setTime(hour, minute, 30);
+            Serial.println("Time set to: " + String(hour) + ":" + String(minute));
+        }
+    }
 }
 
 void fadeLEDs(int newWarmWhiteValue, int oldWarmWhiteValue, int newCoolWhiteValue, int oldCoolWhiteValue)
@@ -93,7 +109,7 @@ void fadeLEDs(int newWarmWhiteValue, int oldWarmWhiteValue, int newCoolWhiteValu
     {
         analogWrite(WARM_WHITE_PIN, oldWarmWhiteValue + (newWarmWhiteValue - oldWarmWhiteValue) * i / 255);
         analogWrite(COOL_WHITE_PIN, oldCoolWhiteValue + (newCoolWhiteValue - oldCoolWhiteValue) * i / 255);
-        delay(10);
+        delay(20);
     }
 }
 
@@ -114,19 +130,14 @@ void getLEDValues(int &warmWhiteValue, int &coolWhiteValue) {
     // Darker at night, peak at 13:00
     warmWhiteValue = 96 * sin((0.5 * PI * decimalTime / 24) - (7 * 2 * PI / 24)) + 159;
     if (decimalTime < 9.0 || decimalTime > 21.0) { // Greatly reduce blue light during the night
-        coolWhiteValue = 0.1967 * pow((decimalTime - 3), 4);
+        if (decimalTime > 8.0 && decimalTime < 9.0) {
+            coolWhiteValue = 255 * decimalTime - 255 * 8.0;
+        } else if (decimalTime < 22 && decimalTime > 21.0) {
+            coolWhiteValue = -255 * decimalTime + 255 * 22.0;
+        } else {
+            coolWhiteValue = 0;
+        }
     } else {
         coolWhiteValue = 255;
     } 
-}
-
-void setTime() {
-    // set time to compile time
-    RTC.begin();
-    int hours = atoi(__TIME__);
-    int minutes = atoi(__TIME__ + 3);
-    int seconds = atoi(__TIME__ + 6);
-
-    // Set the RTC time
-    RTC.setTime(hours, minutes, seconds);
 }
